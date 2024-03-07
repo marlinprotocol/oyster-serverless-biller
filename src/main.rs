@@ -71,7 +71,7 @@ async fn biller(
                     || async { fetch_last_bill_receipt(billing_ip_port).await },
                 )
                 .await
-                .context("Error fetching the last bill receipt");
+                .context("Error fetching the last bill receipt to claim");
 
                 let Ok(bill_receipt) = bill_receipt else {
                     log_data(format!(
@@ -176,12 +176,7 @@ async fn biller(
     let bill_receipt = Retry::spawn(
         ExponentialBackoff::from_millis(100).map(jitter).take(5), // TODO: SET RETRIES AND BASE MILLIS
         || async {
-            fetch_bill_receipt(
-                billing_ip_port,
-                current_nonce.as_str(),
-                &exporting_tx_hashes,
-            )
-            .await
+            fetch_bill_receipt(billing_ip_port, &current_nonce, &exporting_tx_hashes).await
         },
     )
     .await
@@ -243,19 +238,22 @@ async fn main() -> Result<()> {
         ));
     }
 
-    let rpc_provider = Provider::<Http>::try_from(&cli.rpc_url) // url parse error
+    let rpc_provider = Provider::<Http>::try_from(&cli.rpc_url)
         .context(format!("Error connecting to the rpc {}", cli.rpc_url))?
-        .interval(Duration::from_millis(1000));
+        .interval(Duration::from_millis(1000)); // TODO: FIX INTERVAL MILLIS
     let signer_wallet = Wallet::from_bytes(
         hex::decode(
-            fs::read_to_string(cli.secret_key_file) // io error / corrupt file
+            fs::read_to_string(&cli.secret_key_file)
                 .await
-                .context("Error reading the secret key file")?,
+                .context(format!(
+                    "Error reading the secret key file at path {}",
+                    cli.secret_key_file
+                ))?,
         )
-        .context("Error decoding the secret key")? // secret key not hex encoded or hexadecimal
+        .context("Error decoding the secret key")?
         .as_slice(),
     )
-    .context("Invalid secret key provided")?; // unable to deserialize the secret scalar to key
+    .context("Invalid secret key provided")?;
     let wallet_address = signer_wallet.address();
 
     let signer_client = SignerMiddleware::new(rpc_provider, signer_wallet);
@@ -265,7 +263,7 @@ async fn main() -> Result<()> {
             .context(format!(
                 "Error parsing the billing contract address {} to eth bytes",
                 cli.billing_contract_addr
-            ))?, // contract address not 20 byte hexadecimal string
+            ))?,
         Arc::new(signer_client.clone()),
     );
 

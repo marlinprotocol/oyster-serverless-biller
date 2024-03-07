@@ -12,13 +12,13 @@ use ethers::signers::Wallet;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 
+pub type SignerClient = SignerMiddleware<Provider<Http>, Wallet<SigningKey>>;
+
 abigen!(
     BillingContract,
     "src/contracts/billing_contract_abi.json",
     derives(serde::Serialize, serde::Deserialize)
 );
-
-pub type SignerClient = SignerMiddleware<Provider<Http>, Wallet<SigningKey>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InspectBody {
@@ -39,19 +39,20 @@ pub fn is_valid_ip_with_port(ip_port_str: &str) -> bool {
             }
         }
     }
+
     false
 }
 
-pub fn log_data(log_data: String) {
+pub fn log_data(data: String) {
     if let Err(err) = OpenOptions::new()
         .create(true)
         .write(true)
         .append(true)
         .open("logs.log")
-        .and_then(|mut f| f.write_all(log_data.as_bytes()))
+        .and_then(|mut f| f.write_all(data.as_bytes()))
         .context("Error accessing/writing to the log file")
     {
         eprintln!("[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), err);
-        println!("{}", log_data);
+        println!("{}", data);
     }
 }

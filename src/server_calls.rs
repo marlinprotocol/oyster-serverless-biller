@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::Local;
 use serde_json::json;
 
-use crate::utils::{log_data, ExportBody, InspectBody};
+use crate::utils::{ExportBody, InspectBody};
 
 pub async fn fetch_current_bill(billing_ip_port: &str) -> Result<HashMap<String, u128>> {
     let url = format!("http://{}/billing/inspect", billing_ip_port);
@@ -52,7 +52,7 @@ pub async fn fetch_bill_receipt(
     }
 
     if response.status().is_server_error() {
-        log_data(format!("[{}] Internal server error occurred while signing the bill receipt for nonce: {} and tx_hashes: {:?}", Local::now().format("%Y-%m-%d %H:%M:%S"), nonce, exporting_tx_hashes));
+        eprintln!("[{}] Internal server error occurred while signing the bill receipt for nonce: {} and tx_hashes: {:?}", Local::now().format("%Y-%m-%d %H:%M:%S"), nonce, exporting_tx_hashes);
         return Ok(None);
     }
 

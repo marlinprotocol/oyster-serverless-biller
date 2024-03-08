@@ -1,10 +1,6 @@
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::net::ToSocketAddrs;
 
-use anyhow::Context;
-use chrono::Local;
 use ethers::contract::abigen;
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::{Http, Provider};
@@ -41,18 +37,4 @@ pub fn is_valid_ip_with_port(ip_port_str: &str) -> bool {
     }
 
     false
-}
-
-pub fn log_data(data: String) {
-    if let Err(err) = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open("logs.log")
-        .and_then(|mut f| f.write_all(data.as_bytes()))
-        .context("Error accessing/writing to the log file")
-    {
-        eprintln!("[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), err);
-        println!("{}", data);
-    }
 }

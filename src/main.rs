@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::Local;
 use clap::Parser;
 use ethers::middleware::SignerMiddleware;
-use ethers::providers::{Http, Provider};
+use ethers::providers::{Http, Provider, ProviderExt};
 use ethers::signers::{Signer, Wallet};
 use ethers::types::{Address, H256};
 use tokio::fs;
@@ -19,7 +19,7 @@ use tokio_retry::Retry;
 
 use contract_calls::{is_confirmation_receipt_pending, send_billing_transaction};
 use server_calls::{fetch_bill_receipt, fetch_current_bill, fetch_last_bill_receipt};
-use utils::{is_valid_ip_with_port, log_data, BillingContract, ExportBody, SignerClient};
+use utils::{is_valid_ip_with_port, BillingContract, ExportBody, SignerClient};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -43,6 +43,9 @@ struct CliArgs {
     #[clap(long, value_parser)]
     secret_key_file: String,
 
+    #[clap(long, value_parser)]
+    payee_wallet_address: String,
+
     #[clap(long, value_parser, default_value = "")] // TODO: DEFAULT VALUE
     method_call_cost: u128,
 
@@ -61,6 +64,7 @@ async fn biller(
     method_call_cost: u128,
     balance_transfer_cost: u128,
     nonce: &mut [u8],
+    payee: Address,
 ) -> (bool, Option<ExportBody>, Option<H256>) {
     if is_last_bill_exported {
         let last_bill_receipt = match bill_receipt {
@@ -74,19 +78,19 @@ async fn biller(
                 .context("Error fetching the last bill receipt to claim");
 
                 let Ok(bill_receipt) = bill_receipt else {
-                    log_data(format!(
+                    eprintln!(
                         "[{}] {}",
                         Local::now().format("%Y-%m-%d %H:%M:%S"),
                         bill_receipt.unwrap_err()
-                    ));
+                    );
                     return (true, None, None);
                 };
 
                 let Some(bill_receipt) = bill_receipt else {
-                    log_data(format!(
+                    eprintln!(
                         "[{}] FATAL ERROR: Lost exported bill info pending to claim!!!",
                         Local::now().format("%Y-%m-%d %H:%M:%S")
-                    ));
+                    );
                     return (false, None, None);
                 };
 
@@ -94,34 +98,34 @@ async fn biller(
             }
         };
 
-        let billing_tx = send_billing_transaction(billing_contract, &last_bill_receipt)
+        let billing_tx = send_billing_transaction(billing_contract, &last_bill_receipt, payee)
             .await
             .context("Error sending the billing transaction to the network");
 
         let Ok((bill_tx_hash, bill_tx_receipt)) = billing_tx else {
-            log_data(format!(
+            eprintln!(
                 "[{}] {}",
                 Local::now().format("%Y-%m-%d %H:%M:%S"),
                 billing_tx.unwrap_err()
-            ));
+            );
             return (true, Some(last_bill_receipt), None);
         };
 
         let Some(bill_tx_receipt) = bill_tx_receipt else {
-            log_data(format!(
+            println!(
                 "[{}] Bill submitted {}, PENDING confirmation receipt!!!",
                 Local::now().format("%Y-%m-%d %H:%M:%S"),
                 bill_tx_hash
-            ));
+            );
             return (false, None, Some(bill_tx_hash));
         };
 
-        log_data(format!(
+        println!(
             "[{}] Bill submitted {} successfully with confirmation receipt: {:?}",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             bill_tx_hash,
             bill_tx_receipt
-        ));
+        );
     }
 
     let current_bill = Retry::spawn(
@@ -132,11 +136,11 @@ async fn biller(
     .context("Error fetching the current bill");
 
     let Ok(current_bill) = current_bill else {
-        log_data(format!(
+        eprintln!(
             "[{}] {}",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             current_bill.unwrap_err()
-        ));
+        );
         return (false, None, None);
     };
 
@@ -150,10 +154,10 @@ async fn biller(
     }
 
     if exporting_tx_hashes.is_empty() || margin <= method_call_cost {
-        log_data(format!(
+        println!(
             "[{}] Bill isn't worth claiming!!!",
             Local::now().format("%Y-%m-%d %H:%M:%S")
-        ));
+        );
         return (false, None, None);
     }
 
@@ -162,11 +166,11 @@ async fn biller(
         .context("Error generating current timestamp for nonce");
 
     let Ok(timestamp) = timestamp else {
-        log_data(format!(
+        eprintln!(
             "[{}] {}",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             timestamp.unwrap_err()
-        ));
+        );
         return (false, None, None);
     };
 
@@ -183,11 +187,11 @@ async fn biller(
     .context("Error exporting the bill receipt");
 
     let Ok(bill_receipt) = bill_receipt else {
-        log_data(format!(
+        eprintln!(
             "[{}] {}",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             bill_receipt.unwrap_err()
-        ));
+        );
         return (false, None, None);
     };
 
@@ -195,34 +199,34 @@ async fn biller(
         return (true, None, None);
     };
 
-    let bill_tx = send_billing_transaction(billing_contract, &bill_receipt)
+    let bill_tx = send_billing_transaction(billing_contract, &bill_receipt, payee)
         .await
         .context("Error sending the billing transaction to the network");
 
     let Ok((bill_tx_hash, bill_tx_receipt)) = bill_tx else {
-        log_data(format!(
+        eprintln!(
             "[{}] {}",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             bill_tx.unwrap_err()
-        ));
+        );
         return (true, Some(bill_receipt), None);
     };
 
     let Some(bill_tx_receipt) = bill_tx_receipt else {
-        log_data(format!(
+        println!(
             "[{}] Bill submitted {}, PENDING confirmation receipt!!!",
             Local::now().format("%Y-%m-%d %H:%M:%S"),
             bill_tx_hash
-        ));
+        );
         return (false, None, Some(bill_tx_hash));
     };
 
-    log_data(format!(
+    println!(
         "[{}] Bill submitted {} successfully with confirmation receipt: {:?}",
         Local::now().format("%Y-%m-%d %H:%M:%S"),
         bill_tx_hash,
         bill_tx_receipt
-    ));
+    );
 
     (false, None, None)
 }
@@ -238,9 +242,9 @@ async fn main() -> Result<()> {
         ));
     }
 
-    let rpc_provider = Provider::<Http>::try_from(&cli.rpc_url)
-        .context(format!("Error connecting to the rpc {}", cli.rpc_url))?
-        .interval(Duration::from_millis(1000)); // TODO: FIX INTERVAL MILLIS
+    let rpc_provider = Provider::<Http>::try_connect(&cli.rpc_url)
+        .await
+        .context(format!("Error connecting to the rpc {}", cli.rpc_url))?;
     let signer_wallet = Wallet::from_bytes(
         hex::decode(
             fs::read_to_string(&cli.secret_key_file)
@@ -255,6 +259,13 @@ async fn main() -> Result<()> {
     )
     .context("Invalid secret key provided")?;
     let wallet_address = signer_wallet.address();
+    let payee_wallet_address = cli
+        .payee_wallet_address
+        .parse::<Address>()
+        .context(format!(
+            "Error parsing the payee wallet address {} to eth address H160",
+            cli.payee_wallet_address
+        ))?;
 
     let signer_client = SignerMiddleware::new(rpc_provider, signer_wallet);
     let billing_contract = BillingContract::new(
@@ -296,6 +307,7 @@ async fn main() -> Result<()> {
             cli.method_call_cost,
             cli.balance_transfer_cost,
             nonce.as_mut_slice(),
+            payee_wallet_address,
         )
         .await;
 
